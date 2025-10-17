@@ -18,7 +18,7 @@ import json
 import httpx
 import base64
 import random
-import certifi
+import certifi # <-- 必须保留
 import aiohttp
 import asyncio
 import logging
@@ -224,7 +224,8 @@ class CtClient:
             'X-Requested-With': 'com.ct.client', 
             'Referer': 'https://wapact.189.cn/',
         }
-        self.session = httpx.AsyncClient(timeout=30)
+        # 【修改点 1】：将 verify 参数移至 AsyncClient 初始化时
+        self.session = httpx.AsyncClient(timeout=30, verify=certifi.where())
         self.results = {}
         # 登录成功后保存的关键状态
         self.token = None
@@ -282,8 +283,8 @@ class CtClient:
         }
         
         try:
-            # 使用 certifi 来确保 SSL 验证
-            response = await self.session.post(login_url, json=payload, headers=self.headers, verify=certifi.where())
+            # 【修改点 2】：移除 post 调用中的 verify 参数
+            response = await self.session.post(login_url, json=payload, headers=self.headers)
             
             if response.status_code != 200:
                  self.results['登录'] = f"✗(接口HTTP错误: {response.status_code})"
@@ -327,30 +328,15 @@ class CtClient:
             logger.error(f"登录请求异常: {str(e)}")
             return False
         except Exception as e:
+            # 捕获可能由 JSON 解析等引起的其他异常
             self.results['登录'] = f"✗(处理异常: {type(e).__name__})"
             logger.error(f"登录处理异常: {str(e)}")
             return False
 
     async def _get_sso_ticket(self, phone, userId, token):
         """获取SSO Ticket (Ticket用于某些活动接口)"""
-        try:
-            # 这里的加密函数需要从 189.cn.py 移植，假设 get_ticket 中的 decrypt 是可逆的。
-            # 由于原脚本 DES3 密钥 '1234567`90koiuyhgtfrdews' 和 IV '8 * b'\0'' 不匹配
-            # china_telecom_task.py 的 DES3 密钥，且涉及 XML 格式，我们直接采用 
-            # china_telecom_task.py 中未使用的 'Ticket' 获取逻辑。
-            # 为了兼容性，这里暂时跳过 Ticket 的 XML 请求，因为 china_telecom_task.py 
-            # 本身的任务并没有依赖它。但在您要求整合 189.cn.py 逻辑时，Ticket 是必须的。
-            # 暂时简化为依赖 login 接口返回的 token/sessionKey。
-            # **注意：以下 Ticket 逻辑是基于原 189.cn.py 的复杂且私有加解密逻辑的**
-            # 由于缺乏完整的加解密密钥，这里无法完全复现 189.cn.py 的 Ticket 逻辑，
-            # 只能依赖于 login 返回的 token 和 sessionKey。
-
-            # 为使后续任务兼容，需要一个 Ticket 占位符。
-            # 如果口令兑换失败，可能需要检查 Ticket 获取逻辑。
-            return self.token # 暂时用 token 作为 ticket 占位符，期待任务接口兼容。
-        except Exception as e:
-            logger.error(f"获取SSO Ticket失败: {e}")
-            return None
+        # 由于 Ticket 逻辑复杂，这里暂时用 token 作为 ticket 占位符。
+        return self.token 
 
 
     async def get_total_points(self):
@@ -557,7 +543,7 @@ class CtClient:
             'yxai': codeValue,
             'ticket': self.ticket, 
             'Host': "wapact.189.cn:9001",
-            'User-Agent': "CtClient;11.3.0;Android;12;Redmi K30 Pro;MDM3MzE2!#!MTMxODk", # 尝试使用原脚本的 UA
+            'User-Agent': "CtClient;11.3.0;Android;12;Redmi K30 Pro;MDM3NzE2!#!MTMxODk", # 尝试使用原脚本的 UA
             'activityId': "",
             'wyDataStr': "",
             'masEnv': "android",
