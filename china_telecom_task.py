@@ -256,8 +256,8 @@ class CtClient:
             self.results['登录'] = '✗(RSA加密失败)'
             return False
 
-        # 示例登录请求 (请根据您原脚本中的实际逻辑进行调整)
-        login_url = "https://appgologin.189.cn:9031/go_login/V2/login"
+        # 登录请求
+        login_url = "https://appgologin.189.cn:9031/login/client/userLoginNormal"
         payload = {
             "mobile": self.phone,
             "password": encrypted_password,
