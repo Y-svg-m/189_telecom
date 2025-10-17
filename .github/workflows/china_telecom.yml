@@ -32,9 +32,9 @@ jobs:
 
     - name: Install dependencies
       run: |
-        # 脚本中使用的库，请根据您的实际需求添加
         python -m pip install --upgrade pip
-        pip install requests aiohttp httpx pycryptodome pandas tabulate
+        # 安装脚本中导入的所有主要依赖
+        pip install requests aiohttp httpx pycryptodome pandas tabulate tenacity
 
     - name: Run China Telecom Script
       run: |
