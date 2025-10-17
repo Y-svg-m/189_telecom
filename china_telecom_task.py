@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# 非青龙下在文件开头添加账号配置,
 # process.env.chinaTelecomAccount = `
 # 13454545457#123456
 # 13454545457#456789
@@ -48,8 +49,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # --- START: 环境变量读取和初始化修复 ---
-# 从环境变量读取账号信息。GitHub Actions 中使用 chinaTelecomAccount
-chinaTelecomAccount = os.environ.get('chinaTelecomAccount') or os.environ.get('PHONES1') or ""
+# 从环境变量读取账号信息。GitHub Actions 中使用 chinaTelecomAccount, CHINA_TELECOM_ACCOUNTS, 或 PHONES1
+chinaTelecomAccount = (os.environ.get('chinaTelecomAccount') or 
+                       os.environ.get('CHINA_TELECOM_ACCOUNTS') or 
+                       os.environ.get('PHONES1') or "")
 apptoken = os.environ.get('apptoken') or ""
 
 # 口令变量，使用环境变量 dx_kl 或默认值
@@ -101,7 +104,7 @@ aes_iv = "1234567812345678"              # 16字节 IV
 # 如果程序运行失败，请优先检查此公钥是否过期或失效
 rsa_public_key_str = """
 -----BEGIN PUBLIC KEY-----
-MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC+ugG5A8cZ3FqUKDwM57GM4io6JGcStivT8UdGt67PEOihLZTw3P7371+N47PrmsCpnTRzbTgcupKtUv8ImZalYk65dU8rjC/ridwhw9ffW2LBwvkEnDkkKKRi2liWIItDftJVBiWOh17o6gfbPoNrWORcAdcbpk2L+udld5kZNwIDAQAB
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC+ugG5A8cZ3FqUKDwM57GM4io6JGcStivT8UdGt67PEOihLZTw3P7371+N47PrmsCpnTRzbTgcupKtUv8ImZalYk65dU8rjC/ridwhw9ffW2LBwvkEnDkkKKRi2liWIItDftJVBiWOh17o6gfbPoNrWORcAdcbpk2L+udld5kZNwIDAQA
 -----END PUBLIC KEY-----
 """
 
@@ -151,8 +154,9 @@ def encrypt_rsa(data: str) -> str:
         public_key = RSA.import_key(pem_key.encode('utf-8'))
         cipher_rsa = PKCS1_v1_5.new(public_key)
         
+        # 修复点：将 size_in_bytes 从属性调用改为方法调用：public_key.size_in_bytes()
         # RSA 加密分块处理，因为数据可能超过 RSA 密钥长度
-        max_chunk = public_key.size_in_bytes - 11 # 1024位密钥通常是 117字节
+        max_chunk = public_key.size_in_bytes() - 11 # 1024位密钥通常是 117字节
         
         encrypted_chunks = []
         data_bytes = data.encode('utf-8')
@@ -165,6 +169,7 @@ def encrypt_rsa(data: str) -> str:
         encrypted_data = b"".join(encrypted_chunks)
         return base64.b64encode(encrypted_data).decode('utf-8')
     except Exception as e:
+        # 当 RSA Key 导入失败（如字符串格式不正确）或 size_in_bytes() 失败时，会在此处捕获
         logger.error(f"RSA 加密失败: {e}")
         return ""
 
@@ -330,7 +335,8 @@ class CtClient:
 async def main():
     """主执行函数"""
     if not PHONES:
-        logger.error("请在环境变量 CHINA_TELECOM_ACCOUNTS 中配置手机号和服务密码!")
+        # 更新报错信息，明确指出所有可能的变量名
+        logger.error("请在环境变量 chinaTelecomAccount, CHINA_TELECOM_ACCOUNTS 或 PHONES1 中配置手机号和服务密码!")
         return
         
     accounts = [line.split('#') for line in PHONES.split('\n') if '#' in line]
@@ -361,7 +367,9 @@ async def main():
     # 统计结果
     stats_data = []
     for index, row in df.iterrows():
+        # 统计成功的任务（标记为 '✓'）
         success_count = sum(1 for v in row.values if v == '✓')
+        # 统计失败的任务（包含 '✗'）
         failure_count = sum(1 for v in row.values if '✗' in str(v))
         stats_data.append({
             '手机号': row['手机号'],
