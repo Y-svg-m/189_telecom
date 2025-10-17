@@ -1,9 +1,9 @@
-name: China Telecom Task
+name: 中国电信每日任务
 
 on:
-  # 每天在北京时间 7:30 运行一次
+  # 每天在北京时间 7:30 运行一次 (UTC: 23:30)
   schedule:
-    - cron: '30 23 * * *' # UTC 时间，比北京时间 (GMT+8) 晚 8 小时。7:30 - 8小时 = 前一天 23:30
+    - cron: '30 23 * * *' 
   # 允许手动触发
   workflow_dispatch:
 
@@ -11,37 +11,37 @@ jobs:
   run-script:
     runs-on: ubuntu-latest
     
-    # 定义环境变量
+    # 引用您在 Settings -> Environments 中设置的名称，这里是 'user'
+    environment: user 
+    
+    # 定义环境变量。这里的变量值会自动从 'user' Environment 的 Secrets/Variables 中获取。
     env:
-      # ⚠️ 必须设置，用于脚本中的账号配置。多账号请换行或使用 & 隔开。
-      # 格式: 手机号#服务密码
+      # 账号变量：从 Environment Secrets/Variables 中读取 CHINA_TELECOM_ACCOUNTS
       chinaTelecomAccount: ${{ secrets.CHINA_TELECOM_ACCOUNTS }}
-      # 可选：口令变量，用逗号,区分，例如: 心有灵犀,绑定福利,事事如意
+      # 可选：口令变量
       dx_kl: ${{ secrets.DX_KL }} 
-      # 可选：微信推送 appToken (如果需要推送结果)
+      # 可选：微信推送 appToken
       apptoken: ${{ secrets.WXPUSHER_APPTOKEN }}
+      # 可选：微信推送 UIDs
+      WXPUSHER_UIDS: ${{ secrets.WXPUSHER_UIDS }}
 
     steps:
-    - name: Checkout repository
+    - name: 检出代码 (Checkout repository)
       uses: actions/checkout@v4
 
-    - name: Set up Python
+    - name: 设置 Python 环境 (Set up Python)
       uses: actions/setup-python@v5
       with:
         python-version: '3.x'
 
-    - name: Install dependencies
+    - name: 安装依赖 (Install dependencies)
       run: |
         python -m pip install --upgrade pip
-        # 安装脚本中导入的所有主要依赖
+        # 安装所有必需的库：requests, aiohttp, httpx, pycryptodome, pandas, tabulate, tenacity
         pip install requests aiohttp httpx pycryptodome pandas tabulate tenacity
 
-    - name: Run China Telecom Script
+    - name: 运行中国电信脚本 (Run China Telecom Script)
       run: |
-        # china_telecom_task.py
-        
-        # 将 chinaTelecomAccount 变量注入到脚本中，使其能读取到 Secrets 中的值
-        sed -i "s|chinaTelecomAccount = \"\"|chinaTelecomAccount = \"$chinaTelecomAccount\"|" china_telecom_task.py
-        
-        # 运行脚本
+        # 1. 直接运行脚本，它会自动读取上面 env 中设置的环境变量。
+        #    无需 sed 命令注入。
         python china_telecom_task.py
