@@ -85,58 +85,6 @@ class RateLimiter:
             self.start_time = time.time()
             self.request_count = 1
 
-def pcmToWav(pcm16, sampleRate):
-    """将 PCM 16-bit 数据转换为 WAV Blob"""
-    # 假设 pcm16 是 Int16Array
-    dataView = new DataView(new ArrayBuffer(44 + pcm16.byteLength));
-    let offset = 0;
-
-    function writeString(str) {
-        for (let i = 0; i < str.length; i++) {
-            dataView.setUint8(offset + i, str.charCodeAt(i));
-        }
-        offset += str.length;
-    }
-
-    function writeUint32(val) {
-        dataView.setUint32(offset, val, true);
-        offset += 4;
-    }
-
-    function writeUint16(val) {
-        dataView.setUint16(offset, val, true);
-        offset += 2;
-    }
-
-    // RIFF header
-    writeString('RIFF');
-    writeUint32(36 + pcm16.byteLength);
-    writeString('WAVE');
-
-    // fmt chunk
-    writeString('fmt ');
-    writeUint32(16);
-    writeUint16(1); // Audio format (1 for PCM)
-    writeUint16(1); // Number of channels (1)
-    writeUint32(sampleRate);
-    writeUint32(sampleRate * 2); // Byte rate (SampleRate * NumChannels * BitsPerSample/8)
-    writeUint16(2); // Block align (NumChannels * BitsPerSample/8)
-    writeUint16(16); // Bits per sample (16)
-
-    // data chunk
-    writeString('data');
-    writeUint32(pcm16.byteLength);
-    
-    // Copy PCM data
-    let pcmOffset = offset;
-    for (let i = 0; i < pcm16.length; i++) {
-        dataView.setInt16(pcmOffset, pcm16[i], true);
-        pcmOffset += 2;
-    }
-
-    return new Blob([dataView], { type: 'audio/wav' });
-}
-
 # -----------------------------------------------------------------------------------------------------
 # 密钥配置 - 请勿随意修改，除非加密接口发生变化
 # -----------------------------------------------------------------------------------------------------
@@ -220,22 +168,19 @@ def encrypt_rsa(data: str) -> str:
         logger.error(f"RSA 加密失败: {e}")
         return ""
 
-# (Original AES encryption/decryption functions should be here if they were in the original script)
-# ...
-
 # -----------------------------------------------------------------------------------------------------
 # 工具函数 (脱敏、推送等)
 # -----------------------------------------------------------------------------------------------------
 
 def get_first_three(phone):
-    """获取手机号前2位"""
-    return phone[:2] if phone and len(phone) >= 2 else phone
+    """获取手机号前三位"""
+    return phone[:3] if phone and len(phone) >= 3 else phone
 
 def mask_middle_four(value):
-    """对中间7位进行脱敏"""
+    """对中间四位进行脱敏"""
     if not value or len(value) < 8:
         return value
-    return value[:2] + '*******' + value[-6:]
+    return value[:3] + '****' + value[-4:]
 
 def send(title, content):
     """发送推送消息到 WXPusher"""
@@ -277,20 +222,6 @@ def send(title, content):
     except Exception as e:
         logger.error(f"WXPusher 推送请求异常: {e}")
 
-# (Rest of the original script content, including the main logic and classes, goes here)
-# ... (Assuming your original script had classes like CtClient, main logic, etc.)
-# ... (Please paste the rest of your original content here)
-
-# ==============================================================================
-# 由于我无法访问您原始脚本的完整内容，您需要将您原始脚本中位于 
-# `import pandas as pd` 之后的【所有】代码（包括所有的类定义、函数和主执行逻辑）
-# 粘贴到此处。
-# ==============================================================================
-
-# ----------------- 【粘贴您原始脚本的剩余部分】 -----------------
-
-# 假设您的原始脚本中 CtClient 类和任务执行逻辑在这里
-
 class CtClient:
     """中国电信客户端，处理登录和任务执行"""
     def __init__(self, phone, password):
@@ -298,14 +229,19 @@ class CtClient:
         self.password = password
         self.headers = {
             # 基础头信息
-            # ...
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Content-Type': 'application/json;charset=UTF-8',
         }
+        # 使用 httpx.AsyncClient 并设置 base_url 如果需要
         self.session = httpx.AsyncClient(timeout=30)
         self.results = {}
 
     async def login(self):
         """登录逻辑，使用 RSA 或其他加密方式处理密码"""
         logger.info(f"正在尝试登录账号: {mask_middle_four(self.phone)}")
+        
         # 示例：RSA加密密码
         encrypted_password = encrypt_rsa(self.password)
         if not encrypted_password:
@@ -318,7 +254,7 @@ class CtClient:
             "mobile": self.phone,
             "password": encrypted_password,
             "loginType": "PASSWD",
-            # ... 其他参数
+            "appId": "ACT_WAP"
         }
         try:
             # ⚠️ 这里需要使用您的原始脚本的登录逻辑
@@ -326,8 +262,9 @@ class CtClient:
             result = response.json()
             if result.get('res_code') == '0':
                 self.results['登录'] = '✓'
-                # 提取必要的 token/cookie
-                # self.session.cookies.update(...)
+                # 提取必要的 token/cookie，并更新 session headers
+                # 假设登录返回了 session token 或其他关键信息
+                # self.headers['Authorization'] = result.get('data', {}).get('token')
                 return True
             else:
                 self.results['登录'] = f"✗({result.get('res_message', '登录失败')})"
@@ -359,26 +296,27 @@ class CtClient:
             return
 
         success_count = 0
+        all_kl_results = []
         for kl in WELFARE_CODES:
             logger.info(f"尝试兑换口令: {kl}")
             exchange_url = "https://wapact.189.cn:9001/exchange/reward"
             payload = {"code": kl, "phone": self.phone}
+            kl_result_key = f'兑换-{kl}'
+            
             try:
                 response = await self.session.post(exchange_url, json=payload, headers=self.headers)
                 result = response.json()
                 if result.get('status') == 'SUCCESS':
-                    self.results[f'兑换-{kl}'] = '✓'
+                    all_kl_results.append('✓')
                     success_count += 1
                 else:
-                    self.results[f'兑换-{kl}'] = f"✗({result.get('msg', '失败')})"
+                    all_kl_results.append('✗')
                 await asyncio.sleep(2) # 兑换之间暂停
             except Exception as e:
-                self.results[f'兑换-{kl}'] = f"✗(请求异常)"
+                all_kl_results.append('✗')
+            
+        self.results['口令兑换'] = f"成功({success_count}/{len(WELFARE_CODES)})" if success_count > 0 else "✗"
 
-        if success_count > 0:
-            self.results['口令兑换总计'] = f'成功({success_count}/{len(WELFARE_CODES)})'
-        elif not any(key.startswith('兑换-') for key in self.results):
-             self.results['口令兑换总计'] = f'✗(全部失败)'
 
     async def run_all_tasks(self):
         """执行所有任务"""
@@ -391,7 +329,6 @@ class CtClient:
 
 async def main():
     """主执行函数"""
-    global timeValue, timeDiff
     if not PHONES:
         logger.error("请在环境变量 CHINA_TELECOM_ACCOUNTS 中配置手机号和服务密码!")
         return
@@ -418,11 +355,19 @@ async def main():
     df = pd.DataFrame(all_results)
     df.insert(0, '手机号', [mask_middle_four(acc[0]) for acc in accounts])
     
+    # 清理并简化列名，以防口令兑换列过多
+    df.columns = [col.replace('兑换-', 'KL-') for col in df.columns]
+
     # 统计结果
-    stats_df = df.apply(lambda x: pd.Series({
-        '统计结果': f"成功:{len([s for s in x if s=='✓'])} 失败:{len([s for s in x if s=='✗'])}\"
-    }), axis=1).reset_index()
-    stats_df.columns = ['手机号', '统计结果']
+    stats_data = []
+    for index, row in df.iterrows():
+        success_count = sum(1 for v in row.values if v == '✓')
+        failure_count = sum(1 for v in row.values if '✗' in str(v))
+        stats_data.append({
+            '手机号': row['手机号'],
+            '统计结果': f"成功:{success_count} 失败:{failure_count}"
+        })
+    stats_df = pd.DataFrame(stats_data)
     
     print("\n执行结果:")
     print(tabulate(df, headers='keys', tablefmt='grid', showindex=False))
