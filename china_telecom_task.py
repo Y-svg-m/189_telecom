@@ -177,13 +177,18 @@ def encrypt_rsa(data: str) -> str:
 
 def get_first_three(phone):
     """获取手机号前三位"""
-    return phone[:2] if phone and len(phone) >= 2 else phone
+    return phone[:3] if phone and len(phone) >= 3 else phone
 
 def mask_middle_four(value):
-    """对中间四位进行脱敏"""
-    if not value or len(value) < 8:
+    """只显示手机号的前两位和后两位，中间用星号替代"""
+    if not value or len(value) < 4:
         return value
-    return value[:2] + '*******' + value[-6:]
+    
+    first_two = value[:2]
+    last_two = value[-2:]
+    middle_stars_count = len(value) - 4
+    
+    return first_two + '*' * middle_stars_count + last_two
 
 def send(title, content):
     """发送推送消息到 WXPusher"""
@@ -262,6 +267,13 @@ class CtClient:
         try:
             # ⚠️ 这里需要使用您的原始脚本的登录逻辑
             response = await self.session.post(login_url, json=payload, headers=self.headers)
+            
+            # 新增：检查 HTTP 状态码
+            if response.status_code == 404:
+                 self.results['登录'] = f"✗(登录接口404，URL可能已失效: {login_url})"
+                 logger.error(f"登录失败: URL返回404，请检查登录接口 {login_url} 是否已更新。")
+                 return False
+
             result = response.json()
             if result.get('res_code') == '0':
                 self.results['登录'] = '✓'
