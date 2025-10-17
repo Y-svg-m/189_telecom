@@ -1,0 +1,47 @@
+name: China Telecom Task
+
+on:
+  # 每天在北京时间 7:30 运行一次
+  schedule:
+    - cron: '30 23 * * *' # UTC 时间，比北京时间 (GMT+8) 晚 8 小时。7:30 - 8小时 = 前一天 23:30
+  # 允许手动触发
+  workflow_dispatch:
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    
+    # 定义环境变量
+    env:
+      # ⚠️ 必须设置，用于脚本中的账号配置。多账号请换行或使用 & 隔开。
+      # 格式: 手机号#服务密码
+      chinaTelecomAccount: ${{ secrets.CHINA_TELECOM_ACCOUNTS }}
+      # 可选：口令变量，用逗号,区分，例如: 心有灵犀,绑定福利,事事如意
+      dx_kl: ${{ secrets.DX_KL }} 
+      # 可选：微信推送 appToken (如果需要推送结果)
+      apptoken: ${{ secrets.WXPUSHER_APPTOKEN }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        # 脚本中使用的库，请根据您的实际需求添加
+        python -m pip install --upgrade pip
+        pip install requests aiohttp httpx pycryptodome pandas tabulate
+
+    - name: Run China Telecom Script
+      run: |
+        # china_telecom_task.py
+        
+        # 将 chinaTelecomAccount 变量注入到脚本中，使其能读取到 Secrets 中的值
+        sed -i "s|chinaTelecomAccount = \"\"|chinaTelecomAccount = \"$chinaTelecomAccount\"|" china_telecom_task.py
+        
+        # 运行脚本
+        python china_telecom_task.py
