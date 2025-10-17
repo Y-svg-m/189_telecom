@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-# 非青龙下在文件开头添加账号配置,
-# process.env.chinaTelecomAccount = `
 # 13454545457#123456
 # 13454545457#456789
 # `.trim();
@@ -179,13 +177,13 @@ def encrypt_rsa(data: str) -> str:
 
 def get_first_three(phone):
     """获取手机号前三位"""
-    return phone[:3] if phone and len(phone) >= 3 else phone
+    return phone[:2] if phone and len(phone) >= 2 else phone
 
 def mask_middle_four(value):
     """对中间四位进行脱敏"""
     if not value or len(value) < 8:
         return value
-    return value[:3] + '****' + value[-4:]
+    return value[:2] + '*******' + value[-6:]
 
 def send(title, content):
     """发送推送消息到 WXPusher"""
