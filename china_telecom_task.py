@@ -25,6 +25,7 @@ import logging
 import datetime
 import requests
 import binascii
+import uuid # 导入用于生成设备ID的uuid模块
 from http import cookiejar
 from Crypto.Cipher import AES
 from Crypto.Cipher import DES3
@@ -46,26 +47,22 @@ from tabulate import tabulate
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- START: 环境变量读取和初始化修复 ---
-# 从环境变量读取账号信息。GitHub Actions 中使用 chinaTelecomAccount, CHINA_TELECOM_ACCOUNTS, 或 PHONES1
+# --- START: 环境变量读取和初始化 ---
 chinaTelecomAccount = (os.environ.get('chinaTelecomAccount') or 
                        os.environ.get('CHINA_TELECOM_ACCOUNTS') or 
                        os.environ.get('PHONES1') or "")
 apptoken = os.environ.get('apptoken') or ""
 
-# 口令变量，使用环境变量 dx_kl 或默认值
 WELFARE_CODE = os.environ.get('dx_kl') or "心有灵犀,绑定福利,事事如意,2025加油,草长莺飞,888,年末狂欢,年末回馈"
 WELFARE_CODES = [code.strip() for code in WELFARE_CODE.split(',') if code.strip()]
 
-# 处理账号字符串，兼容换行符和 & 符号分隔
 if '&' in chinaTelecomAccount:
     phone_list = [line.strip() for line in chinaTelecomAccount.split('&') if line.strip()]
 else:
     phone_list = [line.strip() for line in chinaTelecomAccount.split('\n') if line.strip()]
 
-# PHONES 变量用于后续的账号解析逻辑
 PHONES = '\n'.join(phone_list)
-# --- END: 环境变量读取和初始化修复 ---
+# --- END: 环境变量读取和初始化 ---
 
 MAX_RETRIES = 3
 RATE_LIMIT = 10 
@@ -94,15 +91,11 @@ class RateLimiter:
 des3_key = b"A!D89B5C82A2B3D04C5A6F29"  # 24字节密钥
 des3_iv = b"01234567"                   # 8字节 IV
 
-# 2. AES 密钥和 IV (用于某些特定接口)
-aes_key_base = "b417c8008e330c6a"        # AES 密钥基
-aes_iv = "1234567812345678"              # 16字节 IV
-
 # 3. RSA 公钥 - 【重要】请替换为你实际需要的最新公钥字符串，并确保是 PEM 格式
-# 如果程序运行失败，请优先检查此公钥是否过期或失效
+# 注意：此公钥为占位符，请务必替换为有效的 key
 rsa_public_key_str = """
 -----BEGIN PUBLIC KEY-----
-MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDBkLT15ThVgz6/NOl6s8GNPofdWzWbCkWnkaAm7O2LjkM1H7dMvzkiqdxU02jamGRHLX/ZNMCXHnPcW/sDhiFCBN18qFvy8g6VYb9QtroI09e176s+ZCtiv7hbin2cCTj99iUpnEloZm19lwHyo69u5UMiPMpq0/XKBO8lYhN/gwIDAQAB
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC+ugG5A8cZ3FqUKDwM57GM4io6JGcStivT8UdGt67PEOihLZTw3P7371+N47PrmsCpnTRzbTgcupKtUv8ImZalYk65dU8rjC/ridwhw9ffW2LBwvkEnDkkKKRi2liWIItDftJVBiWOh17o6gfbPoNrWORcAdcbpk2L+udld5kZNwIDAQAB
 -----END PUBLIC KEY-----
 """
 
@@ -120,18 +113,6 @@ def encrypt_des3(data: str) -> str:
         return base64.b64encode(encrypted).decode('utf-8')
     except Exception as e:
         logger.error(f"DES3 加密失败: {e}")
-        return ""
-
-def decrypt_des3(encrypted_data: str) -> str:
-    """DES3 解密"""
-    try:
-        cipher = DES3.new(des3_key, DES3.MODE_CBC, des3_iv)
-        decoded = base64.b64decode(encrypted_data)
-        decrypted = cipher.decrypt(decoded)
-        # 移除 PKCS7 填充
-        return unpad(decrypted, DES3.block_size).decode('utf-8')
-    except Exception as e:
-        logger.error(f"DES3 解密失败: {e}")
         return ""
 
 def encrypt_rsa(data: str) -> str:
@@ -152,9 +133,7 @@ def encrypt_rsa(data: str) -> str:
         public_key = RSA.import_key(pem_key.encode('utf-8'))
         cipher_rsa = PKCS1_v1_5.new(public_key)
         
-        # 修复点：将 size_in_bytes 从属性调用改为方法调用：public_key.size_in_bytes()
-        # RSA 加密分块处理，因为数据可能超过 RSA 密钥长度
-        max_chunk = public_key.size_in_bytes() - 11 # 1024位密钥通常是 117字节
+        max_chunk = public_key.size_in_bytes() - 11 
         
         encrypted_chunks = []
         data_bytes = data.encode('utf-8')
@@ -167,16 +146,15 @@ def encrypt_rsa(data: str) -> str:
         encrypted_data = b"".join(encrypted_chunks)
         return base64.b64encode(encrypted_data).decode('utf-8')
     except Exception as e:
-        # 当 RSA Key 导入失败（如字符串格式不正确）或 size_in_bytes() 失败时，会在此处捕获
         logger.error(f"RSA 加密失败: {e}")
         return ""
 
 # -----------------------------------------------------------------------------------------------------
-# 工具函数 (脱敏、推送等)
+# 工具函数 (脱敏、推送、辅助)
 # -----------------------------------------------------------------------------------------------------
 
 def get_first_three(phone):
-    """获取手机号前三位"""
+    """获取手机号前三位 (用于日志打印，遵循原脚本片段)"""
     return phone[:3] if phone and len(phone) >= 3 else phone
 
 def mask_middle_four(value):
@@ -190,13 +168,26 @@ def mask_middle_four(value):
     
     return first_two + '*' * middle_stars_count + last_two
 
+def get_uuid():
+    """生成一个包含三个元素的 UUID 列表 (用于 deviceUid)"""
+    # 生成一个完整的 UUID 字符串，并进行分段
+    random_uuid = str(uuid.uuid4()).replace('-', '')
+    return [random_uuid[:16], random_uuid[16:24], random_uuid[24:]]
+
+def get_timestamp():
+    """获取当前毫秒级时间戳字符串"""
+    return str(int(time.time() * 1000))
+
+def encode_phone(phone: str) -> str:
+    """使用 DES3 加密手机号 (根据原脚本假设 phoneNum 字段为加密)"""
+    return encrypt_des3(phone) 
+
 def send(title, content):
     """发送推送消息到 WXPusher"""
     if not apptoken:
         logger.info("未配置 WXPUSHER_APPTOKEN，跳过推送.")
         return
 
-    # 从环境变量中获取用户 ID 列表
     uids_str = os.environ.get('WXPUSHER_UIDS')
     if not uids_str:
         logger.warning("未配置 WXPUSHER_UIDS，无法推送.")
@@ -209,12 +200,11 @@ def send(title, content):
 
     push_url = "http://wxpusher.zjiecode.com/api/send/message"
     
-    # 构建推送数据
     data = {
         "appToken": apptoken,
-        "content": content.replace('\n', '<br>'), # WXPusher 支持 HTML 换行
+        "content": content.replace('\n', '<br>'), 
         "summary": title,
-        "contentType": 2, # 2 表示 html 格式
+        "contentType": 2, 
         "uids": uids,
         "url": ""
     }
@@ -236,101 +226,180 @@ class CtClient:
         self.phone = phone
         self.password = password
         self.headers = {
-            # 基础头信息
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Mobile Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 15_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148',
             'Accept': '*/*',
             'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
             'Content-Type': 'application/json;charset=UTF-8',
+            'X-Requested-With': 'com.ct.client', 
+            'Referer': 'https://wapact.189.cn/',
         }
-        # 使用 httpx.AsyncClient 并设置 base_url 如果需要
         self.session = httpx.AsyncClient(timeout=30)
         self.results = {}
+        # 登录成功后保存的关键状态
+        self.sessionKey = None 
+        self.token = None
+        self.jf_total = 0
+        
+        # 新增：设备和时间相关参数
+        self.uuid = get_uuid()
 
     async def login(self):
-        """登录逻辑，使用 RSA 或其他加密方式处理密码"""
+        """登录逻辑，使用真实的 client/userLoginNormal 接口和复杂 payload"""
         logger.info(f"正在尝试登录账号: {mask_middle_four(self.phone)}")
         
-        # 示例：RSA加密密码
-        encrypted_password = encrypt_rsa(self.password)
-        if not encrypted_password:
+        # 1. 准备加密数据
+        timestamp = get_timestamp()
+        # 假设 loginAuthCipherAsymmertric 是 RSA 加密的服务密码
+        login_auth_data = self.password
+        loginAuthCipherAsymmertric = encrypt_rsa(login_auth_data)
+        
+        if not loginAuthCipherAsymmertric:
             self.results['登录'] = '✗(RSA加密失败)'
             return False
 
-        # 登录请求
         login_url = "https://appgologin.189.cn:9031/login/client/userLoginNormal"
+        
+        # 2. 构建复杂的 JSON Payload
         payload = {
-            "mobile": self.phone,
-            "password": encrypted_password,
-            "loginType": "PASSWD",
-            "appId": "ACT_WAP"
+            "headerInfos": {
+                "code": "userLoginNormal",
+                "timestamp": timestamp,
+                "broadAccount": "",
+                "broadToken": "",
+                # 遵循用户提供的 clientType
+                "clientType": "#9.6.1#channel50#iPhone 14 Pro Max#", 
+                "shopId": "20002",
+                "source": "110003",
+                "sourcePassword": "Sid98s",
+                "token": "",
+                "userLoginName": self.phone
+            },
+            "content": {
+                "attach": "test",
+                "fieldData": {
+                    "loginType": "4",
+                    "accountType": "",
+                    "loginAuthCipherAsymmertric": loginAuthCipherAsymmertric, 
+                    # 组合 UUID 
+                    "deviceUid": self.uuid[0] + self.uuid[1] + self.uuid[2],
+                    "phoneNum": encode_phone(self.phone), # DES3 加密手机号
+                    "isChinatelecom": "0",
+                    # 遵循用户提供的 systemVersion
+                    "systemVersion": "15.4.0", 
+                    "authentication": self.password # 保留原脚本片段中的明文 password
+                }
+            }
         }
+        
+        logger.info(f"开始登录请求 - 手机号: {get_first_three(self.phone)}...")
+
         try:
-            # ⚠️ 这里需要使用您的原始脚本的登录逻辑
-            response = await self.session.post(login_url, json=payload, headers=self.headers)
+            response = await self.session.post(login_url, json=payload, headers=self.headers, verify=certifi.where())
             
-            # 新增：检查 HTTP 状态码
-            if response.status_code == 404:
-                 self.results['登录'] = f"✗(登录接口404，URL可能已失效: {login_url})"
-                 logger.error(f"登录失败: URL返回404，请检查登录接口 {login_url} 是否已更新。")
+            if response.status_code != 200:
+                 self.results['登录'] = f"✗(接口HTTP错误: {response.status_code})"
+                 logger.error(f"登录失败: URL返回 HTTP {response.status_code}，请检查登录接口 {login_url} 是否已更新。")
                  return False
 
             result = response.json()
-            if result.get('res_code') == '0':
-                self.results['登录'] = '✓'
-                # 提取必要的 token/cookie，并更新 session headers
-                # 假设登录返回了 session token 或其他关键信息
-                # self.headers['Authorization'] = result.get('data', {}).get('token')
-                return True
-            else:
-                self.results['登录'] = f"✗({result.get('res_message', '登录失败')})"
-                return False
-        except Exception as e:
-            self.results['登录'] = f"✗(请求异常: {str(e)})"
-            return False
+            logger.info(f"登录响应: {result}")
+            
+            # 3. 解析响应
+            res_code = result.get('res_code')
+            res_message = result.get('res_message')
+            
+            if res_code == '0':
+                # 登录成功，提取 token/sessionKey
+                data = result.get('data', {}).get('content', {})
+                self.token = data.get('token')
+                self.sessionKey = data.get('sessionKey') 
 
-    # 示例：签到任务
+                if self.token:
+                    # 更新 session headers 以供后续任务使用
+                    self.session.headers.update({
+                        'Authorization': f'Bearer {self.token}',
+                        'X-Request-Auth': self.token, 
+                        'sessionKey': self.sessionKey or '', 
+                        'X-Request-ID': get_timestamp(), 
+                    })
+                    self.results['登录'] = '✓'
+                    return True
+                else:
+                    self.results['登录'] = f"✗(响应成功但缺少Token)"
+                    logger.error(f"登录成功响应但缺少Token: {result}")
+                    return False
+            else:
+                self.results['登录'] = f"✗({res_message or '登录失败'})"
+                logger.error(f"登录失败: {res_message} | 响应: {result}")
+                return False
+        
+        except httpx.RequestError as e:
+            self.results['登录'] = f"✗(请求异常: {type(e).__name__})"
+            logger.error(f"登录请求异常: {str(e)}")
+            return False
+        except Exception as e:
+            self.results['登录'] = f"✗(处理异常: {str(e)})"
+            return False
+            
+    async def get_total_points(self):
+        """获取用户当前可用积分总数"""
+        jf_url = "https://wapact.189.cn:9001/SignActivity-api/task/getIntegral"
+        try:
+            response = await self.session.post(jf_url, headers=self.session.headers)
+            result = response.json()
+            if result.get('status') == 'SUCCESS':
+                self.jf_total = int(result.get('totalIntegral', 0))
+                self.results['总积分'] = self.jf_total
+            else:
+                self.results['总积分'] = '获取失败'
+        except Exception as e:
+            self.results['总积分'] = f"获取失败({str(e)})"
+
     async def run_sign_in_task(self):
         """执行签到任务"""
+        if not self.token:
+            self.results['签到'] = '✗(未登录)'
+            return
+
         logger.info(f"执行签到任务...")
         sign_url = "https://wapact.189.cn:9001/SignActivity-api/task/signIn"
         try:
-            response = await self.session.post(sign_url, headers=self.headers)
+            response = await self.session.post(sign_url, headers=self.session.headers)
             result = response.json()
             if result.get('status') == 'SUCCESS':
                 self.results['签到'] = '✓'
             else:
-                self.results['签到'] = f"✗({result.get('msg', '签到失败')})"
+                self.results['签到'] = f"✗({result.get('msg', '已签')})"
         except Exception as e:
             self.results['签到'] = f"✗(请求异常: {str(e)})"
 
-    # 示例：口令兑换任务
     async def run_exchange_task(self):
         """执行口令兑换任务"""
         if not WELFARE_CODES:
             self.results['口令兑换'] = '跳过(未配置口令)'
             return
+        if not self.token:
+            self.results['口令兑换'] = '✗(未登录)'
+            return
 
         success_count = 0
-        all_kl_results = []
+        
         for kl in WELFARE_CODES:
             logger.info(f"尝试兑换口令: {kl}")
             exchange_url = "https://wapact.189.cn:9001/exchange/reward"
             payload = {"code": kl, "phone": self.phone}
-            kl_result_key = f'兑换-{kl}'
             
             try:
-                response = await self.session.post(exchange_url, json=payload, headers=self.headers)
+                response = await self.session.post(exchange_url, json=payload, headers=self.session.headers)
                 result = response.json()
                 if result.get('status') == 'SUCCESS':
-                    all_kl_results.append('✓')
                     success_count += 1
-                else:
-                    all_kl_results.append('✗')
-                await asyncio.sleep(2) # 兑换之间暂停
-            except Exception as e:
-                all_kl_results.append('✗')
+                
+                await asyncio.sleep(1 + random.random() * 2) 
+            except Exception:
+                pass 
             
-        self.results['口令兑换'] = f"成功({success_count}/{len(WELFARE_CODES)})" if success_count > 0 else "✗"
+        self.results['口令兑换'] = f"✓({success_count}/{len(WELFARE_CODES)})" if success_count > 0 else "✗"
 
 
     async def run_all_tasks(self):
@@ -338,14 +407,13 @@ class CtClient:
         if await self.login():
             await self.run_sign_in_task()
             await self.run_exchange_task()
-            # ... 其他任务
+            await self.get_total_points() 
         await self.session.aclose()
 
 
 async def main():
     """主执行函数"""
     if not PHONES:
-        # 更新报错信息，明确指出所有可能的变量名
         logger.error("请在环境变量 chinaTelecomAccount, CHINA_TELECOM_ACCOUNTS 或 PHONES1 中配置手机号和服务密码!")
         return
         
@@ -371,16 +439,17 @@ async def main():
     df = pd.DataFrame(all_results)
     df.insert(0, '手机号', [mask_middle_four(acc[0]) for acc in accounts])
     
-    # 清理并简化列名，以防口令兑换列过多
-    df.columns = [col.replace('兑换-', 'KL-') for col in df.columns]
-
+    # 重新排列列顺序，将登录和积分放前面
+    desired_cols = ['手机号', '登录', '签到', '总积分', '口令兑换']
+    current_cols = df.columns.tolist()
+    final_cols = [col for col in desired_cols if col in current_cols] + [col for col in current_cols if col not in desired_cols]
+    df = df[final_cols]
+    
     # 统计结果
     stats_data = []
     for index, row in df.iterrows():
-        # 统计成功的任务（标记为 '✓'）
-        success_count = sum(1 for v in row.values if v == '✓')
-        # 统计失败的任务（包含 '✗'）
-        failure_count = sum(1 for v in row.values if '✗' in str(v))
+        success_count = sum(1 for k, v in row.items() if k not in ['手机号', '总积分'] and '✓' in str(v))
+        failure_count = sum(1 for k, v in row.items() if k not in ['手机号', '总积分'] and '✗' in str(v))
         stats_data.append({
             '手机号': row['手机号'],
             '统计结果': f"成功:{success_count} 失败:{failure_count}"
@@ -408,7 +477,6 @@ try:
         pd.set_option('display.width', None)
         pd.set_option('display.max_colwidth', None)
         
-        # 确保 asyncio 事件循环运行 main 函数
         asyncio.run(main())
 
 except Exception as e:
