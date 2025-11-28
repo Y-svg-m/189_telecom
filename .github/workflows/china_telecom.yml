@@ -2,8 +2,8 @@ name: 中国电信每日任务
 
 on:
   # 每天在北京时间 7:30 运行一次 (UTC: 23:30)
-  schedule:
-    - cron: '30 23 * * *' 
+  #schedule:
+   # - cron: '30 23 * * *' 
   # 允许手动触发
   workflow_dispatch:
 
